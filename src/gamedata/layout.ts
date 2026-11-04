@@ -14,6 +14,7 @@ const LEVEL_EXTS: Record<EngineNumber, string[]> = {
     1: ['.phd', '.psx', '.tub'],
     2: ['.tr2', '.psx'],
     3: ['.tr2', '.psx'],
+    4: ['.tr4'],
 };
 
 function basename(p: string): string {
@@ -35,6 +36,11 @@ export function mapFileToVfsPath(
 
     const levelExts = LEVEL_EXTS[engine] ?? [];
     const base = `games/${mod}`;
+
+    // Archives already laid out as the engine expects keep their paths.
+    if (file.path.startsWith(`${base}/`)) {
+        return file.path;
+    }
 
     if (endsWithAny(name, levelExts)) {
         return `${base}/levels/${name}`;

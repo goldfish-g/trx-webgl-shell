@@ -1,4 +1,4 @@
-export type EngineNumber = 1 | 2 | 3;
+export type EngineNumber = 1 | 2 | 3 | 4;
 
 export type GamedataKind = 'shipped' | 'user';
 

@@ -16,13 +16,13 @@ type Source =
 
 const UPLOAD_VALUE = '__upload__';
 
-const EXPANSION_LABEL: Record<EngineNumber, string> = {
+const EXPANSION_LABEL: Partial<Record<EngineNumber, string>> = {
     1: 'Unfinished Business',
     2: 'The Golden Mask',
     3: 'The Lost Artifact',
 };
 
-const EXPANSION_MOD: Record<EngineNumber, string> = {
+const EXPANSION_MOD: Partial<Record<EngineNumber, string>> = {
     1: 'tr1-ub',
     2: 'tr2-gm',
     3: 'tr3-la',
@@ -32,6 +32,7 @@ const BASE_MOD: Record<EngineNumber, string> = {
     1: 'tr1',
     2: 'tr2',
     3: 'tr3',
+    4: 'tr4',
 };
 
 type TypeChoice = 'original' | 'expansion' | 'custom-level';
@@ -154,7 +155,9 @@ export function CreateProfileDialog({ onClose }: Props) {
             return { mod: BASE_MOD[engine], mode: 'original' };
         }
         if (type === 'expansion') {
-            return { mod: EXPANSION_MOD[engine], mode: 'expansion' };
+            const mod = EXPANSION_MOD[engine];
+            if (!mod) return 'This game has no expansion.';
+            return { mod, mode: 'expansion' };
         }
         const slug = slugify(customSlug || profileName);
         if (!slug) return 'Custom level needs an identifier.';
