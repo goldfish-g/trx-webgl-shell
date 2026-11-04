@@ -10,6 +10,7 @@ export interface BuildAdaptersOptions {
     readyGamedata: GamedataRecord[];
     canvas: HTMLCanvasElement;
     getFs: () => EngineFs;
+    getIdbfs: () => unknown;
     /** Called when the start gate opens (waiting for user interaction). */
     onGateOpen?: () => void;
     /** Called when the start gate closes (after user interaction). */
@@ -40,7 +41,7 @@ export function buildAdapters(opts: BuildAdaptersOptions): BuiltAdapters {
     const byMod = new Map<string, GamedataRecord>();
     for (const g of toStage) byMod.set(g.mod, g);
 
-    const persistence = makePersistenceAdapter(opts.getFs);
+    const persistence = makePersistenceAdapter(opts.getFs, opts.getIdbfs);
 
     const adapters: TrxAdapters = {
         startGate: makeStartGateAdapter(opts.canvas, {

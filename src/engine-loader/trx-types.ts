@@ -36,12 +36,12 @@ export interface EngineFs {
     readFile(path: string): Uint8Array;
     mount(fs: unknown, opts: Record<string, unknown>, path: string): void;
     syncfs(populate: boolean, cb: (err: Error | null) => void): void;
-    filesystems: { IDBFS: unknown };
 }
 
 export interface TrxEngine {
     canvas: HTMLCanvasElement;
     fs: EngineFs;
+    idbfs: unknown;
     version: string;
     run(args: string[]): Promise<number>;
     syncViewport(): void;

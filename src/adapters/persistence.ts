@@ -11,6 +11,7 @@ const DEBOUNCE_MS = 100;
 
 export function makePersistenceAdapter(
     getFs: () => EngineFs,
+    getIdbfs: () => unknown,
 ): PersistenceBuilder {
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -38,7 +39,7 @@ export function makePersistenceAdapter(
                     } catch (_) {}
                 }
                 try {
-                    fs.mount(fs.filesystems.IDBFS, {}, mountPath);
+                    fs.mount(getIdbfs(), {}, mountPath);
                 } catch (err) {
                     console.warn('[adapter] mount IDBFS failed:', err);
                 }

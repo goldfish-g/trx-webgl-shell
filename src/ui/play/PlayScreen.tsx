@@ -63,10 +63,12 @@ export function PlayScreen() {
                 if (!canvas) return;
 
                 let fsRef: EngineFs | null = null;
+                let idbfsRef: unknown = null;
                 const getFs = () => {
                     if (!fsRef) throw new Error('engine fs not yet available');
                     return fsRef;
                 };
+                const getIdbfs = () => idbfsRef;
 
                 setState({ kind: 'loading', message: 'Creating engine…' });
                 const { adapters, preStage } = buildAdapters({
@@ -74,6 +76,7 @@ export function PlayScreen() {
                     readyGamedata,
                     canvas,
                     getFs,
+                    getIdbfs,
                     onGateOpen: () => {
                         if (!cancelled) setState({ kind: 'awaiting-input' });
                     },
@@ -95,6 +98,7 @@ export function PlayScreen() {
                 if (cancelled) return;
                 engineRef.current = engine;
                 fsRef = engine.fs;
+                idbfsRef = engine.idbfs;
 
                 setState({ kind: 'loading', message: 'Staging game files…' });
                 await preStage(engine.fs);
