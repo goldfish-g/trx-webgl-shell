@@ -1,16 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadEngineVersions } from '../engine/versions';
 import { FEATURES } from '../features';
-import {
-    customMod,
-    ENGINE_NAMES,
-    findGame,
-    GAMES,
-    guessGame,
-    type EngineNumber,
-} from '../games/catalog';
+import { customMod, ENGINE_NAMES, findGame, GAMES, type EngineNumber } from '../games/catalog';
+import { detectGame, type Detection } from '../games/detect';
 import { importGameData } from '../gamedata/imports';
-import { LayoutError, planLayout } from '../gamedata/layout';
+import { LayoutError, loneLevelPath, planLayout } from '../gamedata/layout';
 import { loadServerCatalog } from '../gamedata/server';
 import type { GameDataLayout, GameDataRecord, ServerGameData } from '../gamedata/types';
 import { ArchiveError, readArchive, readFolder, type ArchiveEntry } from '../lib/archive';
@@ -22,33 +16,108 @@ import { describeSource } from './describe';
 type Choice =
     | { kind: 'library'; record: GameDataRecord }
     | { kind: 'server'; entry: ServerGameData }
-    | { kind: 'upload'; name: string; entries: ArchiveEntry[] }
+    | { kind: 'upload'; name: string; entries: ArchiveEntry[]; detection: Detection }
     | { kind: 'link'; url: string };
 
-/** A game picked from the catalog, or a custom level for an engine. */
-type GameKey = string;
-const CUSTOM = 'custom:';
-
+/** What the new profile plays. */
 interface Target {
+    /** The directory the game data goes into. */
     mod: string;
     engine: EngineNumber;
     layout: GameDataLayout;
     title: string;
+    /** The mod the engine runs, which for a lone level is trN-level. */
+    runMod: string;
+    /** For a lone level, the one the engine starts. */
+    startLevel?: string;
+    /** The game this one needs alongside it to start. */
+    needs?: string;
 }
 
-function resolveTarget(key: GameKey, levelName: string): Target | null {
-    if (key.startsWith(CUSTOM)) {
-        const engine = Number(key.slice(CUSTOM.length)) as EngineNumber;
-        const name = levelName.trim();
-        return name === '' ? null : { mod: customMod(name), engine, layout: 'custom', title: name };
-    }
-    const game = findGame(key);
-    return game === undefined ? null : { mod: game.mod, engine: game.engine, layout: 'game', title: game.title };
-}
+/** Reading uploaded files as what the detection found, or as a game the player picked. */
+const AS_DETECTED = 'detected';
 
 function describeError(error: unknown): string {
     if (error instanceof ArchiveError || error instanceof LayoutError) return error.message;
     return error instanceof Error ? error.message : String(error);
+}
+
+/** Reads an archive, or takes a lone level file as it is. */
+async function readFileOrArchive(file: File): Promise<ArchiveEntry[]> {
+    try {
+        return await readArchive(file);
+    } catch (error) {
+        if (error instanceof ArchiveError && /\.(phd|tub|tr2|tr4)$/i.test(file.name)) return readFolder([file]);
+        throw error;
+    }
+}
+
+function basename(path: string): string {
+    return path.slice(path.lastIndexOf('/') + 1).toLowerCase();
+}
+
+function gameTarget(mod: string): Target | null {
+    const game = findGame(mod);
+    if (game === undefined) return null;
+    return {
+        mod: game.mod,
+        engine: game.engine,
+        layout: 'game',
+        title: game.title,
+        runMod: game.mod,
+        needs: game.requires,
+    };
+}
+
+function detectedTarget(detection: Detection, level: string): Target | null {
+    switch (detection.kind) {
+        case 'game':
+            return gameTarget(detection.game.mod);
+        case 'custom':
+            return {
+                mod: customMod(detection.name),
+                engine: detection.engine,
+                layout: 'custom',
+                title: detection.name,
+                runMod: customMod(detection.name),
+                needs: detection.extendsMod ?? undefined,
+            };
+        case 'level': {
+            const name = basename(level);
+            const title = name.replace(/\.[^.]+$/, '');
+            const mod = customMod(title);
+            return {
+                mod,
+                engine: detection.engine,
+                layout: 'level',
+                title,
+                runMod: `tr${detection.engine}-level`,
+                startLevel: loneLevelPath(mod, name),
+                needs: `tr${detection.engine}`,
+            };
+        }
+        case 'unknown':
+            return null;
+    }
+}
+
+function describeDetection(detection: Detection): string {
+    switch (detection.kind) {
+        case 'game': {
+            const { game, found, expected } = detection;
+            return found === expected
+                ? `Recognised as ${game.title}, with all ${expected} of its levels.`
+                : `Recognised as ${game.title}, but only ${found} of its ${expected} levels are here. The game stops where a level is missing.`;
+        }
+        case 'custom':
+            return `A custom level for ${ENGINE_NAMES[detection.engine]}, “${detection.name}”, with its own gameflow.`;
+        case 'level':
+            return detection.levels.length === 1
+                ? `A level file for ${ENGINE_NAMES[detection.engine]}, which the engine plays on its own.`
+                : `${detection.levels.length} level files for ${ENGINE_NAMES[detection.engine]}, which the engine plays one at a time.`;
+        case 'unknown':
+            return detection.reason;
+    }
 }
 
 function useAsync<T>(load: () => Promise<T>): { value: T | undefined; error: string | null } {
@@ -78,8 +147,8 @@ export function NewProfileDialog({ library, onClose }: Props) {
     const catalog = useAsync(loadServerCatalog);
     const versions = useAsync(loadEngineVersions);
     const [choice, setChoice] = useState<Choice | null>(null);
-    const [gameKey, setGameKey] = useState<GameKey>('tr1');
-    const [levelName, setLevelName] = useState('');
+    const [gameKey, setGameKey] = useState<string>(AS_DETECTED);
+    const [level, setLevel] = useState('');
     const [profileName, setProfileName] = useState('');
     const [nameEdited, setNameEdited] = useState(false);
     const [engineVersion, setEngineVersion] = useState<string | null>(null);
@@ -101,23 +170,33 @@ export function NewProfileDialog({ library, onClose }: Props) {
     const offered = (catalog.value ?? []).filter((entry) => !installedEntries.has(entry.id));
     const version = engineVersion ?? versions.value?.[0] ?? null;
 
-    // What the new profile plays, once a choice says it.
     const target: Target | null = useMemo(() => {
         if (choice === null) return null;
-        if (choice.kind === 'library') {
-            const { mod, engine, layout, name } = choice.record;
-            return { mod, engine, layout, title: findGame(mod)?.title ?? name };
+        switch (choice.kind) {
+            case 'library': {
+                const { mod, engine, layout, name, startLevel } = choice.record;
+                return {
+                    mod,
+                    engine,
+                    layout,
+                    title: findGame(mod)?.title ?? name,
+                    runMod: layout === 'level' ? `tr${engine}-level` : mod,
+                    startLevel,
+                };
+            }
+            case 'server':
+                return gameTarget(choice.entry.mod);
+            case 'upload':
+                return gameKey === AS_DETECTED ? detectedTarget(choice.detection, level) : gameTarget(gameKey);
+            case 'link':
+                return gameKey === AS_DETECTED ? null : gameTarget(gameKey);
         }
-        if (choice.kind === 'server') {
-            const { mod, engine, name } = choice.entry;
-            return { mod, engine, layout: 'game', title: findGame(mod)?.title ?? name };
-        }
-        return resolveTarget(gameKey, levelName);
-    }, [choice, gameKey, levelName]);
+    }, [choice, gameKey, level]);
 
-    // Checks that uploaded files make the game asked for, before anything is stored.
+    // Checks that uploaded files make what was asked for, before anything is stored.
     const layoutProblem = useMemo(() => {
-        if (choice?.kind !== 'upload' || target === null) return null;
+        if (choice?.kind !== 'upload') return null;
+        if (target === null) return choice.detection.kind === 'unknown' ? null : 'Choose what these files are.';
         try {
             planLayout(choice.entries, target);
             return null;
@@ -125,6 +204,13 @@ export function NewProfileDialog({ library, onClose }: Props) {
             return describeError(problem);
         }
     }, [choice, target]);
+
+    // A custom level or an expansion builds on a game, which has to be in the library too.
+    const missingBase = useMemo(() => {
+        if (target?.needs === undefined || choice?.kind === 'library') return null;
+        const present = library.some((record) => record.mod === target.needs && record.status !== 'failed');
+        return present ? null : (findGame(target.needs)?.title ?? target.needs);
+    }, [target, choice, library]);
 
     useEffect(() => {
         if (!nameEdited) setProfileName(target?.title ?? '');
@@ -135,9 +221,10 @@ export function NewProfileDialog({ library, onClose }: Props) {
         setReading(true);
         try {
             const entries = await read();
-            const guess = guessGame(entries.map((entry) => entry.path));
-            if (guess !== undefined) setGameKey(guess.mod);
-            setChoice({ kind: 'upload', name, entries });
+            const detection = await detectGame(entries);
+            setGameKey(detection.kind === 'unknown' ? (GAMES[0]?.mod ?? 'tr1') : AS_DETECTED);
+            setLevel(detection.kind === 'level' ? (detection.levels[0] ?? '') : '');
+            setChoice({ kind: 'upload', name, entries, detection });
         } catch (problem) {
             setError(describeError(problem));
         } finally {
@@ -151,6 +238,13 @@ export function NewProfileDialog({ library, onClose }: Props) {
         setError(null);
         try {
             let gamedataId: string;
+            const meta = {
+                name: target.title,
+                mod: target.mod,
+                engine: target.engine,
+                layout: target.layout,
+                startLevel: target.startLevel,
+            };
             switch (choice.kind) {
                 case 'library':
                     gamedataId = choice.record.id;
@@ -159,10 +253,8 @@ export function NewProfileDialog({ library, onClose }: Props) {
                     const { entry } = choice;
                     const record = await importGameData(
                         {
+                            ...meta,
                             name: entry.name,
-                            mod: entry.mod,
-                            engine: entry.engine,
-                            layout: 'game',
                             source: { kind: 'server', entryId: entry.id, url: entry.url },
                             sizeBytes: entry.sizeBytes,
                         },
@@ -173,7 +265,7 @@ export function NewProfileDialog({ library, onClose }: Props) {
                 }
                 case 'upload': {
                     const record = await importGameData(
-                        { name: target.title, ...target, source: { kind: 'upload', name: choice.name } },
+                        { ...meta, source: { kind: 'upload', name: choice.name } },
                         { kind: 'files', entries: choice.entries },
                     );
                     gamedataId = record.id;
@@ -181,7 +273,7 @@ export function NewProfileDialog({ library, onClose }: Props) {
                 }
                 case 'link': {
                     const record = await importGameData(
-                        { name: target.title, ...target, source: { kind: 'link', url: choice.url } },
+                        { ...meta, source: { kind: 'link', url: choice.url } },
                         { kind: 'download' },
                     );
                     gamedataId = record.id;
@@ -191,7 +283,7 @@ export function NewProfileDialog({ library, onClose }: Props) {
             await createProfile({
                 name: profileName.trim() || target.title,
                 gamedataId,
-                mod: target.mod,
+                mod: target.runMod,
                 engine: target.engine,
                 engineVersion: version,
             });
@@ -202,7 +294,8 @@ export function NewProfileDialog({ library, onClose }: Props) {
         }
     };
 
-    const needsGamePicker = choice?.kind === 'upload' || choice?.kind === 'link';
+    const detection = choice?.kind === 'upload' ? choice.detection : null;
+    const offersDetected = detection !== null && detection.kind !== 'unknown';
     const canCreate =
         choice !== null && target !== null && version !== null && layoutProblem === null && !busy && !reading;
 
@@ -272,7 +365,7 @@ export function NewProfileDialog({ library, onClose }: Props) {
                     <p className="choices__heading">From this device</p>
                     <div className="choices__buttons">
                         <button className="button" disabled={reading} onClick={() => fileInput.current?.click()}>
-                            Choose an archive…
+                            Choose a file…
                         </button>
                         <button className="button" disabled={reading} onClick={() => folderInput.current?.click()}>
                             Choose a folder…
@@ -282,11 +375,11 @@ export function NewProfileDialog({ library, onClose }: Props) {
                         ref={fileInput}
                         type="file"
                         hidden
-                        accept=".zip,.tar,.tgz,.gz,application/zip,application/x-tar,application/gzip"
+                        accept=".zip,.tar,.tgz,.gz,.phd,.tub,.tr2,.tr4,application/zip,application/x-tar,application/gzip"
                         onChange={(event) => {
                             const file = event.target.files?.[0];
                             event.target.value = '';
-                            if (file !== undefined) void pickUpload(file.name, () => readArchive(file));
+                            if (file !== undefined) void pickUpload(file.name, () => readFileOrArchive(file));
                         }}
                     />
                     <input
@@ -303,9 +396,14 @@ export function NewProfileDialog({ library, onClose }: Props) {
                     />
                     {reading ? <p className="choices__note">Reading the files…</p> : null}
                     {choice?.kind === 'upload' ? (
-                        <p className="choices__picked">
-                            {choice.name} · {choice.entries.length} files
-                        </p>
+                        <div className="choices__picked">
+                            <p>
+                                {choice.name} · {choice.entries.length} files
+                            </p>
+                            <p className={choice.detection.kind === 'unknown' ? 'dialog__error' : 'choices__note'}>
+                                {describeDetection(choice.detection)}
+                            </p>
+                        </div>
                     ) : null}
                 </div>
 
@@ -323,7 +421,10 @@ export function NewProfileDialog({ library, onClose }: Props) {
                             <button
                                 className="button"
                                 disabled={!URL.canParse(linkUrl)}
-                                onClick={() => setChoice({ kind: 'link', url: linkUrl })}
+                                onClick={() => {
+                                    setGameKey(GAMES[0]?.mod ?? 'tr1');
+                                    setChoice({ kind: 'link', url: linkUrl });
+                                }}
                             >
                                 Use link
                             </button>
@@ -334,14 +435,21 @@ export function NewProfileDialog({ library, onClose }: Props) {
 
             {choice !== null ? (
                 <div className="fields">
-                    {needsGamePicker ? (
+                    {choice.kind === 'upload' || choice.kind === 'link' ? (
                         <label className="field">
-                            <span className="field__label">Game</span>
+                            <span className="field__label">These files are</span>
                             <select
                                 className="field__input"
                                 value={gameKey}
                                 onChange={(event) => setGameKey(event.target.value)}
                             >
+                                {offersDetected ? (
+                                    <option value={AS_DETECTED}>
+                                        {detection.kind === 'game'
+                                            ? `${detection.game.title} (recognised)`
+                                            : `A custom level for ${ENGINE_NAMES[detection.engine]} (recognised)`}
+                                    </option>
+                                ) : null}
                                 <optgroup label="Games">
                                     {GAMES.map((game) => (
                                         <option key={game.mod} value={game.mod}>
@@ -349,25 +457,23 @@ export function NewProfileDialog({ library, onClose }: Props) {
                                         </option>
                                     ))}
                                 </optgroup>
-                                <optgroup label="Custom levels">
-                                    {([1, 2, 3, 4] as const).map((engine) => (
-                                        <option key={engine} value={`${CUSTOM}${engine}`}>
-                                            Custom level for {ENGINE_NAMES[engine]}
-                                        </option>
-                                    ))}
-                                </optgroup>
                             </select>
                         </label>
                     ) : null}
-                    {needsGamePicker && gameKey.startsWith(CUSTOM) ? (
+                    {detection?.kind === 'level' && gameKey === AS_DETECTED && detection.levels.length > 1 ? (
                         <label className="field">
-                            <span className="field__label">Level name</span>
-                            <input
+                            <span className="field__label">Start with</span>
+                            <select
                                 className="field__input"
-                                value={levelName}
-                                maxLength={60}
-                                onChange={(event) => setLevelName(event.target.value)}
-                            />
+                                value={level}
+                                onChange={(event) => setLevel(event.target.value)}
+                            >
+                                {detection.levels.map((path) => (
+                                    <option key={path} value={path}>
+                                        {basename(path)}
+                                    </option>
+                                ))}
+                            </select>
                         </label>
                     ) : null}
                     <label className="field">
@@ -407,6 +513,12 @@ export function NewProfileDialog({ library, onClose }: Props) {
                 </div>
             ) : null}
 
+            {missingBase !== null ? (
+                <p className="dialog__warning">
+                    This builds on {missingBase}, which is not in your library. Add {missingBase} as well, or it will
+                    not start.
+                </p>
+            ) : null}
             {layoutProblem !== null ? <p className="dialog__error">{layoutProblem}</p> : null}
             {error !== null ? <p className="dialog__error">{error}</p> : null}
         </Dialog>

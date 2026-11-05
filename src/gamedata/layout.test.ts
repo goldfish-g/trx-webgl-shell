@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { customMod, guessGame } from '../games/catalog';
+import { customMod } from '../games/catalog';
 import type { ArchiveEntry } from '../lib/archive';
 import { LayoutError, placeGameFile, planLayout } from './layout';
 
@@ -52,21 +52,19 @@ describe('planLayout', () => {
         ]);
     });
 
+    it('keeps lone levels out of the directories the engine takes for mods', () => {
+        const plan = planLayout(entries(['My Level/MyLevel.TR2', 'My Level/music/theme.ogg', 'My Level/readme.txt']), {
+            mod: 'custom-mylevel',
+            engine: 2,
+            layout: 'level',
+        });
+        expect(plan.map((file) => file.path)).toEqual(['custom-levels/custom-mylevel/mylevel.tr2']);
+    });
+
     it('refuses a custom level without a gameflow', () => {
         expect(() => planLayout(entries(['levels/a.tr2']), { mod: 'custom-x', engine: 2, layout: 'custom' })).toThrow(
             LayoutError,
         );
-    });
-});
-
-describe('guessGame', () => {
-    it('tells the games apart by their files', () => {
-        expect(guessGame(['DATA/GYM.PHD'])?.mod).toBe('tr1');
-        expect(guessGame(['data/wall.TR2', 'data/boat.tr2'])?.mod).toBe('tr2');
-        expect(guessGame(['data/jungle.tr2', 'audio/cdaudio.wad'])?.mod).toBe('tr3');
-        expect(guessGame(['data/angkor1.tr4'])?.mod).toBe('tr4');
-        expect(guessGame(['games/tr2-gm/levels/level1.tr2'])?.mod).toBe('tr2-gm');
-        expect(guessGame(['readme.txt'])).toBeUndefined();
     });
 });
 

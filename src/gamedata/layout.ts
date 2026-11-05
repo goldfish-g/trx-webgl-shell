@@ -21,6 +21,7 @@ export interface LayoutTarget {
 /** A set of files that cannot become the game asked for. */
 export class LayoutError extends Error {}
 
+const LEVEL_FILE = /\.(phd|tub|tr2|tr4)$/;
 const MUSIC = ['.flac', '.mp3', '.ogg', '.wav'];
 const VIDEO = ['.rpl', '.bik', '.avi', '.mp4', '.ogv', '.webm', '.fmv'];
 
@@ -34,6 +35,11 @@ function basename(path: string): string {
 
 function endsWithAny(name: string, extensions: readonly string[]): boolean {
     return extensions.some((extension) => name.endsWith(extension));
+}
+
+/** Where a lone level file goes, for the engine to play it on its own. */
+export function loneLevelPath(mod: string, name: string): string {
+    return `custom-levels/${mod}/${name.toLowerCase()}`;
 }
 
 /** Where a file of a game goes, or null for files the engine has no use for. */
@@ -68,12 +74,24 @@ function findCustomRoot(paths: readonly string[]): string | null {
 
 /** Decides where each entry goes, leaving out the ones the engine never reads. */
 export function planLayout(entries: readonly ArchiveEntry[], target: LayoutTarget): PlannedFile[] {
+    // Lone levels stay out of games/, where the engine looks for mods.
+    if (target.layout === 'level') {
+        const planned = entries.flatMap((entry) => {
+            const name = basename(normalize(entry.path));
+            return LEVEL_FILE.test(name) ? [{ entry, path: loneLevelPath(target.mod, name) }] : [];
+        });
+        if (planned.length === 0) {
+            throw new LayoutError('There are no level files among these files.');
+        }
+        return planned;
+    }
+
     if (target.layout === 'game') {
         const planned = entries.flatMap((entry) => {
             const path = placeGameFile(entry.path, target.mod, target.engine);
             return path === null ? [] : [{ entry, path }];
         });
-        if (!planned.some((file) => file.path.includes('/levels/') || /\.(phd|tr2|tr4|tub|psx)$/.test(file.path))) {
+        if (!planned.some((file) => LEVEL_FILE.test(file.path))) {
             throw new LayoutError('These files hold no levels for this game.');
         }
         return planned;

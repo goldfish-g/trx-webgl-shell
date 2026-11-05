@@ -70,6 +70,15 @@ async function stageFiles(
     }
 }
 
+/** What the engine is told to play. A lone level plays through trN-level. */
+function engineArgs(profile: ProfileRecord, own: GameDataRecord): string[] {
+    const engine = ['--engine', String(profile.engine)];
+    if (own.layout === 'level' && own.startLevel !== undefined) {
+        return [...engine, '--level', `/${own.startLevel}`];
+    }
+    return [...engine, '--mod', profile.mod];
+}
+
 /** Plays a profile, and resolves with the engine's exit code once it exits. */
 export async function runSession(options: SessionOptions): Promise<number> {
     const { profile, canvas, signal, onStage, onRetry } = options;
@@ -121,7 +130,7 @@ export async function runSession(options: SessionOptions): Promise<number> {
     try {
         await stageFiles(started, records, (done, total) => onStage({ kind: 'files', done, total }));
         await markProfilePlayed(profile.id);
-        return await started.run(['--engine', String(profile.engine), '--mod', profile.mod]);
+        return await started.run(engineArgs(profile, records[0]!));
     } finally {
         window.removeEventListener('resize', onResize);
         window.visualViewport?.removeEventListener('resize', onResize);

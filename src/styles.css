@@ -366,6 +366,14 @@ p {
     font-size: 14px;
 }
 
+.dialog__warning {
+    padding: 10px 12px;
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    background: rgb(216 162 74 / 0.08);
+    font-size: 14px;
+}
+
 .choices {
     display: grid;
     gap: 16px;

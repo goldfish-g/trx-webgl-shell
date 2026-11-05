@@ -11,10 +11,11 @@ export type GameDataSource =
 
 /**
  * How the files map to the engine's directories. A game sorts its files by
- * kind into levels/, music/, fmv/ and so on; a custom level keeps the tree
- * around its gameflow.json5 as it is.
+ * kind into levels/, music/, fmv/ and so on. A custom level keeps the tree
+ * around its gameflow.json5 as it is. Level files without a gameflow go into
+ * levels/, for the engine to play one of them on its own.
  */
-export type GameDataLayout = 'game' | 'custom';
+export type GameDataLayout = 'game' | 'custom' | 'level';
 
 export type GameDataStatus = 'importing' | 'ready' | 'failed';
 
@@ -30,6 +31,8 @@ export interface GameDataRecord {
     error?: string;
     sizeBytes: number;
     fileCount: number;
+    /** For the level layout, the level the engine starts, such as games/x/levels/a.tr2. */
+    startLevel?: string;
     createdAt: string;
 }
 

@@ -54,6 +54,8 @@ export interface NewGameData {
     source: GameDataSource;
     /** The size the server gives for a download, to show progress early. */
     sizeBytes?: number;
+    /** For the level layout, the level the engine starts. */
+    startLevel?: string;
 }
 
 /** What to import from: files at hand, or the source's address. */
@@ -174,6 +176,7 @@ export async function importGameData(meta: NewGameData, input: ImportInput): Pro
         status: 'importing',
         sizeBytes: meta.sizeBytes ?? 0,
         fileCount: 0,
+        startLevel: meta.startLevel,
         createdAt: new Date().toISOString(),
     };
     await putGameData(record);

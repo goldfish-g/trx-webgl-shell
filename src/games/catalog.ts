@@ -9,11 +9,14 @@ export interface Game {
     title: string;
     /** The game an expansion builds on. */
     expansionOf?: string;
+    /** A game whose files this one cannot start without. */
+    requires?: string;
 }
 
 export const GAMES: readonly Game[] = [
     { mod: 'tr1', engine: 1, title: 'Tomb Raider' },
-    { mod: 'tr1-ub', engine: 1, title: 'Unfinished Business', expansionOf: 'tr1' },
+    // Unfinished Business opens on Tomb Raider's title level.
+    { mod: 'tr1-ub', engine: 1, title: 'Unfinished Business', expansionOf: 'tr1', requires: 'tr1' },
     { mod: 'tr1-demo-pc', engine: 1, title: 'Tomb Raider (PC demo)' },
     { mod: 'tr2', engine: 2, title: 'Tomb Raider II' },
     { mod: 'tr2-gm', engine: 2, title: 'The Golden Mask', expansionOf: 'tr2' },
@@ -49,26 +52,4 @@ export function customMod(name: string): string {
         .replace(/^-+|-+$/g, '')
         .slice(0, 40);
     return `custom-${slug || 'level'}`;
-}
-
-/**
- * Guesses which game a set of files belongs to, from the level files and
- * the extras only one game ships. Returns undefined when nothing fits.
- */
-export function guessGame(paths: readonly string[]): Game | undefined {
-    const names = paths.map((path) => path.toLowerCase());
-    const has = (test: (name: string) => boolean) => names.some(test);
-    const prefixed = names.find((name) => /(^|\/)games\/[^/]+\//.test(name));
-    if (prefixed !== undefined) {
-        const mod = /(^|\/)games\/([^/]+)\//.exec(prefixed)?.[2];
-        const game = mod === undefined ? undefined : findGame(mod);
-        if (game !== undefined) return game;
-    }
-    if (has((n) => n.endsWith('.tr4'))) return findGame('tr4');
-    if (has((n) => n.endsWith('.phd') || n.endsWith('.tub'))) return findGame('tr1');
-    if (has((n) => n.endsWith('.tr2'))) {
-        const isTr3 = has((n) => n.endsWith('cdaudio.wad') || /(^|\/)jungle\.tr2$/.test(n));
-        return findGame(isTr3 ? 'tr3' : 'tr2');
-    }
-    return undefined;
 }
