@@ -106,11 +106,60 @@ describe('detectGame', () => {
         expect(detection).toEqual({ kind: 'level', engine: 2, levels: ['MyLevel.tr2'] });
     });
 
+    it('sends levels for the original games and older engines to the converter', async () => {
+        const classic = await detectGame([
+            file('data/tombpc.dat', 'script'),
+            file('data/one_night.tr2', HEADERS[2]),
+            file('data/title.tr2', HEADERS[2]),
+        ]);
+        expect(classic).toMatchObject({ kind: 'convert', reason: expect.stringMatching(/TOMBPC/) });
+
+        const legacy = await detectGame([
+            file('Pack/cfg/TR1X_gameflow.json5', '{ "levels": [] }'),
+            file('Pack/cfg/tr1/gameflow.json5', '{ "levels": [] }'),
+            file('Pack/data/domain.phd', HEADERS[1]),
+        ]);
+        expect(legacy).toMatchObject({ kind: 'convert', reason: expect.stringMatching(/older engine/) });
+
+        const outside = await detectGame([
+            file('Pack/games/tr2-custom/gameflow.json5', '{ "engine": 2 }'),
+            file('Pack/data/level.tr2', HEADERS[2]),
+        ]);
+        expect(outside).toMatchObject({ kind: 'convert', reason: expect.stringMatching(/outside/) });
+    });
+
+    it('does not take a custom level for a game by its title level', async () => {
+        const detection = await detectGame([
+            file('Pack/cfg/TR1X_gameflow.json5', '{}'),
+            file('Pack/data/title.phd', HEADERS[1]),
+            file('Pack/data/manor.phd', HEADERS[1]),
+            file('Pack/data/lost_domain.phd', HEADERS[1]),
+        ]);
+        expect(detection).toMatchObject({ kind: 'convert' });
+    });
+
+    it('takes the official games for what they are, script and all', async () => {
+        const gog = [file('app/data/TOMBPC.DAT', 'script'), ...levels('tr2', 2)];
+        expect(await detectGame(gog)).toMatchObject({ kind: 'game', game: { mod: 'tr2' } });
+    });
+
+    it('takes what the converter makes as a custom level', async () => {
+        const detection = await detectGame([
+            file('games/one-night/gameflow.json5', '{ "engine": 2, "extends": "tr2", "name": "One Night" }'),
+            file('games/one-night/levels/one_night.tr2', HEADERS[2]),
+            file('games/one-night/main.sfx', 'sfx'),
+            // The converter keeps the script it converted from.
+            file('games/one-night/tombpc.dat', 'script'),
+        ]);
+        expect(detection).toMatchObject({ kind: 'custom', engine: 2, name: 'One Night', root: 'games/one-night/' });
+    });
+
     it('explains what it cannot read', async () => {
         expect(await detectGame([file('readme.txt')])).toMatchObject({ kind: 'unknown' });
         expect(await detectGame([file('fake.tr2', 'not a level')])).toMatchObject({ kind: 'unknown' });
+        // A gameflow that names no engine comes from an older engine.
         expect(await detectGame([file('mod/gameflow.json5', '{ "name": "No engine" }')])).toMatchObject({
-            kind: 'unknown',
+            kind: 'convert',
         });
     });
 });

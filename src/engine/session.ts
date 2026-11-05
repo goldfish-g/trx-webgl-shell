@@ -37,9 +37,10 @@ export function checkBrowserSupport(): string | null {
 }
 
 /**
- * The game data a profile plays with: its own, and every other set for the
- * same engine, so an expansion finds its base game and the in-game mod
- * switcher offers the rest.
+ * The game data a profile plays with: its own, and the games for the same
+ * engine, which expansions and custom levels build on and the in-game mod
+ * switcher offers. Other custom levels stay out, so they never weigh on a
+ * session they are not part of.
  */
 async function gameDataFor(profile: ProfileRecord): Promise<GameDataRecord[]> {
     const own = await getGameData(profile.gamedataId);
@@ -47,7 +48,8 @@ async function gameDataFor(profile: ProfileRecord): Promise<GameDataRecord[]> {
         throw new Error('The game data for this profile is not ready. Check the library.');
     }
     const others = (await listGameData()).filter(
-        (record) => record.id !== own.id && record.status === 'ready' && record.engine === own.engine,
+        (record) =>
+            record.id !== own.id && record.status === 'ready' && record.engine === own.engine && record.layout === 'game',
     );
     return [own, ...others];
 }

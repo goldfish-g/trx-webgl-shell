@@ -4,6 +4,7 @@ import { FEATURES } from '../features';
 import { customMod, ENGINE_NAMES, findGame, GAMES, type EngineNumber } from '../games/catalog';
 import { detectGame, type Detection } from '../games/detect';
 import { importGameData } from '../gamedata/imports';
+import { LEVEL_CONVERTER_URL } from '../links';
 import { LayoutError, loneLevelPath, planLayout } from '../gamedata/layout';
 import { loadServerCatalog } from '../gamedata/server';
 import type { GameDataLayout, GameDataRecord, ServerGameData } from '../gamedata/types';
@@ -96,6 +97,7 @@ function detectedTarget(detection: Detection, level: string): Target | null {
                 needs: `tr${detection.engine}`,
             };
         }
+        case 'convert':
         case 'unknown':
             return null;
     }
@@ -115,10 +117,29 @@ function describeDetection(detection: Detection): string {
             return detection.levels.length === 1
                 ? `A level file for ${ENGINE_NAMES[detection.engine]}, which the engine plays on its own.`
                 : `${detection.levels.length} level files for ${ENGINE_NAMES[detection.engine]}, which the engine plays one at a time.`;
+        case 'convert':
+            return `${detection.reason} Convert it with the TRX Level Converter first, then add what it gives you here.`;
         case 'unknown':
             return detection.reason;
     }
 }
+
+/** How the game picker offers what the detection found, if it found something to play. */
+function labelDetected(detection: Detection): string | null {
+    switch (detection.kind) {
+        case 'game':
+            return `${detection.game.title} (recognised)`;
+        case 'custom':
+        case 'level':
+            return `A custom level for ${ENGINE_NAMES[detection.engine]} (recognised)`;
+        case 'convert':
+        case 'unknown':
+            return null;
+    }
+}
+
+/** Reading uploaded files as no game yet, until the player picks one. */
+const UNCHOSEN = '';
 
 function useAsync<T>(load: () => Promise<T>): { value: T | undefined; error: string | null } {
     const [state, setState] = useState<{ value: T | undefined; error: string | null }>({
@@ -187,6 +208,7 @@ export function NewProfileDialog({ library, onClose }: Props) {
             case 'server':
                 return gameTarget(choice.entry.mod);
             case 'upload':
+                if (choice.detection.kind === 'convert') return null;
                 return gameKey === AS_DETECTED ? detectedTarget(choice.detection, level) : gameTarget(gameKey);
             case 'link':
                 return gameKey === AS_DETECTED ? null : gameTarget(gameKey);
@@ -196,7 +218,7 @@ export function NewProfileDialog({ library, onClose }: Props) {
     // Checks that uploaded files make what was asked for, before anything is stored.
     const layoutProblem = useMemo(() => {
         if (choice?.kind !== 'upload') return null;
-        if (target === null) return choice.detection.kind === 'unknown' ? null : 'Choose what these files are.';
+        if (target === null) return null;
         try {
             planLayout(choice.entries, target);
             return null;
@@ -222,7 +244,7 @@ export function NewProfileDialog({ library, onClose }: Props) {
         try {
             const entries = await read();
             const detection = await detectGame(entries);
-            setGameKey(detection.kind === 'unknown' ? (GAMES[0]?.mod ?? 'tr1') : AS_DETECTED);
+            setGameKey(detection.kind === 'unknown' || detection.kind === 'convert' ? UNCHOSEN : AS_DETECTED);
             setLevel(detection.kind === 'level' ? (detection.levels[0] ?? '') : '');
             setChoice({ kind: 'upload', name, entries, detection });
         } catch (problem) {
@@ -295,7 +317,7 @@ export function NewProfileDialog({ library, onClose }: Props) {
     };
 
     const detection = choice?.kind === 'upload' ? choice.detection : null;
-    const offersDetected = detection !== null && detection.kind !== 'unknown';
+    const detectedLabel = detection === null ? null : labelDetected(detection);
     const canCreate =
         choice !== null && target !== null && version !== null && layoutProblem === null && !busy && !reading;
 
@@ -400,9 +422,20 @@ export function NewProfileDialog({ library, onClose }: Props) {
                             <p>
                                 {choice.name} · {choice.entries.length} files
                             </p>
-                            <p className={choice.detection.kind === 'unknown' ? 'dialog__error' : 'choices__note'}>
+                            <p
+                                className={
+                                    choice.detection.kind === 'unknown' || choice.detection.kind === 'convert'
+                                        ? 'dialog__error'
+                                        : 'choices__note'
+                                }
+                            >
                                 {describeDetection(choice.detection)}
                             </p>
+                            {choice.detection.kind === 'convert' && LEVEL_CONVERTER_URL !== null ? (
+                                <a className="button" href={LEVEL_CONVERTER_URL} target="_blank" rel="noreferrer">
+                                    Open the TRX Level Converter
+                                </a>
+                            ) : null}
                         </div>
                     ) : null}
                 </div>
@@ -422,7 +455,7 @@ export function NewProfileDialog({ library, onClose }: Props) {
                                 className="button"
                                 disabled={!URL.canParse(linkUrl)}
                                 onClick={() => {
-                                    setGameKey(GAMES[0]?.mod ?? 'tr1');
+                                    setGameKey(UNCHOSEN);
                                     setChoice({ kind: 'link', url: linkUrl });
                                 }}
                             >
@@ -435,7 +468,7 @@ export function NewProfileDialog({ library, onClose }: Props) {
 
             {choice !== null ? (
                 <div className="fields">
-                    {choice.kind === 'upload' || choice.kind === 'link' ? (
+                    {(choice.kind === 'upload' && choice.detection.kind !== 'convert') || choice.kind === 'link' ? (
                         <label className="field">
                             <span className="field__label">These files are</span>
                             <select
@@ -443,13 +476,12 @@ export function NewProfileDialog({ library, onClose }: Props) {
                                 value={gameKey}
                                 onChange={(event) => setGameKey(event.target.value)}
                             >
-                                {offersDetected ? (
-                                    <option value={AS_DETECTED}>
-                                        {detection.kind === 'game'
-                                            ? `${detection.game.title} (recognised)`
-                                            : `A custom level for ${ENGINE_NAMES[detection.engine]} (recognised)`}
+                                {gameKey === UNCHOSEN ? (
+                                    <option value={UNCHOSEN} disabled>
+                                        Choose the game
                                     </option>
                                 ) : null}
+                                {detectedLabel !== null ? <option value={AS_DETECTED}>{detectedLabel}</option> : null}
                                 <optgroup label="Games">
                                     {GAMES.map((game) => (
                                         <option key={game.mod} value={game.mod}>
