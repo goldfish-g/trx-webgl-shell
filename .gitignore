@@ -5,4 +5,6 @@ dist
 .DS_Store
 *.tsbuildinfo
 public/engines/*/
-public/gamedata-shipped/*.tar.gz
+public/gamedata/*
+!public/gamedata/manifest.json
+!public/gamedata/README.md

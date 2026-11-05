@@ -1,6 +1,7 @@
-# Engine artifacts
+# Engine builds
 
-Each `<version>/` subdirectory holds one TRX WebGL engine build:
+Each `<version>/` directory holds one TRX WebGL build, as `just
+trx-package-webgl` in the TRX repository packages it:
 
 ```
 <version>/
@@ -11,9 +12,6 @@ Each `<version>/` subdirectory holds one TRX WebGL engine build:
   TRX.data
 ```
 
-Version directories are gitignored — large binary artifacts produced by
-`tools/build_webgl.sh` in the [TRX](../../../TRX) repo. Drop new builds
-in here locally, then list them in `manifest.json` (which **is**
-tracked).
-
-See the repo root [README](../../README.md) for the copy-in command.
+The version directories are gitignored. List each one in `manifest.json`,
+which is tracked. Profiles keep the version they were made with, so a new
+build never changes an existing profile's game.

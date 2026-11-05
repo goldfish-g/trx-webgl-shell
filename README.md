@@ -1,31 +1,18 @@
-# TRX WebGL Shell (reference frontend)
+# TRX WebGL Shell
 
-Reference React frontend for the [TRX WebGL engine](../TRX). Demonstrates
-how to consume the engine's adapter contract (`createTRX` /
-`Module.trxAdapters`) and layers on:
+A web front end for the [TRX](../TRX) engine's browser build. It keeps a
+library of game data and profiles, and runs the engine through the adapter
+contract in TRX's `tools/shared/emscripten/trx-adapter.d.ts`.
 
-- A **Library** screen showing one card per profile.
-- User-supplied game data imports (folder picker, `.zip`, `.tar.gz`).
-- **Multi-version engine support**: each profile is pinned to the engine
-  version that created it. Breaking engine changes don't strand old
-  profiles.
-- Save/config persistence via IDBFS (per `/persist/<mod>`).
-
-## Layout
-
-```
-public/
-  engines/<version>/      Engine artifact (trx-adapter.{js,d.ts} +
-                          trx-engine.js + TRX.{wasm,data})
-  gamedata-shipped/       Optional default data (manifest.json + archives)
-src/
-  engine-loader/          Dynamic load of /engines/<ver>/trx.js
-  db/                     IndexedDB wrapper (idb)
-  gamedata/               Library state machine, tar.gz extraction
-  profiles/               Profile CRUD
-  adapters/               Concrete TrxAdapters implementation
-  ui/                     React components (Library, Play, dialogs)
-```
+- **Profiles** play one game each, with saves and settings of their own,
+  and keep the engine version they were made with.
+- **Game data** comes from the server's catalog, from an archive or a
+  folder on the device, or (behind `FEATURES.linkSources`) from a link.
+  Downloads resume where they stopped, across reloads and dropped
+  connections.
+- **Engine builds** download once per version and stay in the browser.
+- **Input** comes from the keyboard, gamepads, or the engine's own touch
+  controls.
 
 ## Running
 
@@ -34,20 +21,41 @@ pnpm install
 pnpm dev
 ```
 
-The dev server sets COOP/COEP headers (required for SharedArrayBuffer /
-pthreads). Open http://localhost:5173/ and follow the Library UI.
-
-## Adding an engine build
+The engine runs threads, which need `SharedArrayBuffer`. Browsers offer it
+only to pages served over HTTPS (or from localhost) with the
+`Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp` headers. The dev and preview
+servers send both.
 
 ```bash
-# From the TRX repo, build the engine:
-./tools/build_webgl.sh release
-
-# Then copy the artifact in:
-mkdir -p public/engines/1.5.0
-cp ../TRX/build/webgl/{trx-adapter.js,trx-adapter.d.ts,trx-engine.js,TRX.wasm,TRX.data} \
-   public/engines/1.5.0/
+pnpm test        # unit tests
+pnpm typecheck
+pnpm build       # production build in dist/
 ```
 
-The `public/engines/manifest.json` lists available versions. Edit it
-when you drop a new version in.
+## Serving
+
+`public/engines/` holds the engine builds, one directory per version, listed
+in `public/engines/manifest.json`. `public/gamedata/` holds the archives the
+server offers, listed in `public/gamedata/manifest.json`. The README in each
+describes its layout. Whatever serves the build must send the two headers
+above, and should answer Range requests, so that downloads resume.
+
+## Layout
+
+```
+src/
+  games/      the games the engine plays, and how to recognise their files
+  gamedata/   the library's game data: imports, layout, storage
+  profiles/   profiles and where their saves live
+  engine/     loading the engine, its adapters, and running a session
+  lib/        downloads, archives and the database, independent of the rest
+  library/    the library screen
+  play/       the play screen
+  ui/         shared components
+```
+
+Each play session starts with a full page load, so every session gets a
+fresh engine. Game data lives in IndexedDB, one record per file. A profile's
+saves live in IndexedDB databases of their own, named
+`/profiles/<profile>/<mod>`, which the engine sees at `/persist/<mod>`.
