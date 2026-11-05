@@ -3,6 +3,7 @@
 // archive of any size never has to fit in memory.
 
 import { ArchiveError, type ArchiveEntry } from './entry';
+import { decodeLzma } from './lzma';
 
 const END_OF_DIRECTORY = 0x06054b50;
 const ZIP64_LOCATOR = 0x07064b50;
@@ -14,6 +15,7 @@ const FLAG_ENCRYPTED = 0x0001;
 const FLAG_UTF8 = 0x0800;
 const METHOD_STORED = 0;
 const METHOD_DEFLATED = 8;
+const METHOD_LZMA = 14;
 const MAX_COMMENT = 0xffff;
 
 async function viewOf(blob: Blob, start: number, end: number): Promise<DataView> {
@@ -64,6 +66,7 @@ async function readEntry(
     blob: Blob,
     localOffset: number,
     compressedSize: number,
+    size: number,
     method: number,
 ): Promise<Blob> {
     const header = await viewOf(blob, localOffset, localOffset + 30);
@@ -73,8 +76,24 @@ async function readEntry(
     const start = localOffset + 30 + header.getUint16(26, true) + header.getUint16(28, true);
     const data = blob.slice(start, start + compressedSize);
     if (method === METHOD_STORED) return data;
+    if (method === METHOD_LZMA) {
+        // A version, the length of the properties, then the properties.
+        const bytes = new Uint8Array(await data.arrayBuffer());
+        const propsSize = bytes[2]! | (bytes[3]! << 8);
+        const props = bytes.subarray(4, 4 + propsSize);
+        return new Blob([decodeLzma(props, bytes, 4 + propsSize, size) as BlobPart]);
+    }
     const inflated = data.stream().pipeThrough(new DecompressionStream('deflate-raw'));
     return new Response(inflated).blob();
+}
+
+/** Why an entry cannot be read, or null when it can. */
+function unreadable(path: string, flags: number, method: number): string | null {
+    if ((flags & FLAG_ENCRYPTED) !== 0) return `${path} is encrypted, which is not supported.`;
+    if (![METHOD_STORED, METHOD_DEFLATED, METHOD_LZMA].includes(method)) {
+        return `${path} is compressed in a way that is not supported (zip method ${method}).`;
+    }
+    return null;
 }
 
 export async function readZip(blob: Blob): Promise<ArchiveEntry[]> {
@@ -119,16 +138,15 @@ export async function readZip(blob: Blob): Promise<ArchiveEntry[]> {
         at = extraEnd + commentLength;
 
         if (path.endsWith('/')) continue;
-        if ((flags & FLAG_ENCRYPTED) !== 0) {
-            throw new ArchiveError(`${path} is encrypted, which is not supported.`);
-        }
-        if (method !== METHOD_STORED && method !== METHOD_DEFLATED) {
-            throw new ArchiveError(`${path} uses a compression method that is not supported.`);
-        }
+        // A file the shell cannot read only matters if it is needed.
+        const problem = unreadable(path, flags, method);
         entries.push({
             path,
             size,
-            read: () => readEntry(blob, localOffset, compressedSize, method),
+            read: () =>
+                problem !== null
+                    ? Promise.reject(new ArchiveError(problem))
+                    : readEntry(blob, localOffset, compressedSize, size, method),
         });
     }
     return entries;

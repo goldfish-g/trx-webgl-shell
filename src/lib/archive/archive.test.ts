@@ -131,6 +131,22 @@ describe('readArchive', () => {
         await expect(readArchive(new Blob(['just text']))).rejects.toBeInstanceOf(ArchiveError);
     });
 
+    it('lists files it cannot read, and refuses only when one is read', async () => {
+        const zip = await makeZip([{ name: 'ok.txt', data: 'fine' }, { name: 'odd.bin', data: 'x' }]);
+        // Mark the second entry as compressed with bzip2 (method 12).
+        const bytes = new Uint8Array(await zip.arrayBuffer());
+        const view = new DataView(bytes.buffer);
+        for (let at = bytes.length - 22; at >= 0; at--) {
+            if (view.getUint32(at, true) === 0x02014b50 && new TextDecoder().decode(bytes.subarray(at + 46, at + 53)) === 'odd.bin') {
+                view.setUint16(at + 10, 12, true);
+            }
+        }
+        const entries = await readArchive(new Blob([bytes]));
+        expect(entries.map((entry) => entry.path)).toEqual(['ok.txt', 'odd.bin']);
+        expect(await (await entries[0]!.read()).text()).toBe('fine');
+        await expect(entries[1]!.read()).rejects.toThrow(/zip method 12/);
+    });
+
     it('refuses a zip whose directory is missing', async () => {
         const broken = new Blob([new Uint8Array([0x50, 0x4b, 3, 4, 0, 0, 0, 0])]);
         await expect(readArchive(broken)).rejects.toBeInstanceOf(ArchiveError);
